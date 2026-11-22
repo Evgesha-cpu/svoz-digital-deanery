@@ -92,6 +92,35 @@ class PolzaWorkflows(unittest.TestCase):
         self.assertEqual(self.chat(self.student, "Оценки")[0], 403)
         self.assertEqual(self.provider.call_count, 2)
 
+    def test_campus_recommendations_only_include_published_events(self):
+        dashboard = self.student.dashboard()
+        lesson = next(row for row in dashboard["lessons"] if row["date"] > dashboard["today"])
+        status, created = self.staff.call("/campus/events", "POST", {
+            "title":"Пересечение с парой", "description":"Тест проверки времени", "category":"culture",
+            "location":"Медиазал", "starts_at":lesson["date"] + "T" + lesson["start"],
+        })
+        self.assertEqual(status, 200, created)
+        self.assertEqual(self.staff.call(f"/campus/events/{created['id']}", "PATCH", {"status":"published"})[0], 200)
+        events = self.student.call("/campus")[1]["events"]
+        pending = next(event for event in events if event["status"] == "pending")
+        published = next(event for event in events if event["status"] == "published")
+        question = "Какие события Кампуса не пересекаются с занятиями?"
+        self.assertEqual(self.chat(self.student, question)[0], 403)
+        self.provider.assert_not_called()
+        self.consent(self.student)
+        self.provider.return_value = {"answer":"Есть события.", "sources":[
+            {"kind":"event","id":published["id"]}, {"kind":"event","id":pending["id"]},
+        ]}
+        status, result = self.chat(self.student, question)
+        self.assertEqual(status, 200, result)
+        self.assertEqual([source["id"] for source in result["sources"]], [published["id"]])
+        context = json.loads(self.provider.call_args.args[1].split("Контекст JSON:\n", 1)[1])
+        self.assertTrue(context["events"])
+        self.assertTrue(all("lesson_conflicts" in event for event in context["events"]))
+        clash = next(event for event in context["events"] if event["id"] == created["id"])
+        self.assertIn(lesson["subject"], clash["lesson_conflicts"])
+        self.assertNotIn(pending["title"], {event["title"] for event in context["events"]})
+
     def test_compound_planning_merges_only_own_context(self):
         self.consent(self.student)
         own = self.student.dashboard()

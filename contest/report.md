@@ -97,3 +97,5 @@ python contest/render_report.py --base contest/report.pdf --output report-review
 ```
 
 Если Arial установлен в другом каталоге, укажите его через `SVOZ_REPORT_FONTS`.
+
+[Отдельное дополнение об обновлении «Кампус»](campus.md) содержит сценарий для жюри, этапы работы с ИИ, статус проверок и снимки.

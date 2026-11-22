@@ -55,3 +55,30 @@ CREATE INDEX IF NOT EXISTS requests_assignee ON requests(assigned_to);
 CREATE INDEX IF NOT EXISTS notifications_owner ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS messages_request ON messages(request_id);
 CREATE INDEX IF NOT EXISTS history_request ON history(request_id);
+
+CREATE TABLE IF NOT EXISTS campus_clubs (
+ id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, description TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS campus_events (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, author_id INTEGER NOT NULL REFERENCES users(id),
+ title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL,
+ starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, location TEXT NOT NULL, organizer TEXT NOT NULL,
+ club_id INTEGER REFERENCES campus_clubs(id),
+ status TEXT NOT NULL CHECK(status IN ('draft','pending','published','rejected','cancelled')),
+ was_published INTEGER NOT NULL DEFAULT 0 CHECK(was_published IN (0,1)),
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS campus_registrations (
+ event_id INTEGER NOT NULL REFERENCES campus_events(id) ON DELETE CASCADE,
+ user_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL,
+ PRIMARY KEY(event_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS campus_members (
+ club_id INTEGER NOT NULL REFERENCES campus_clubs(id) ON DELETE CASCADE,
+ user_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL,
+ PRIMARY KEY(club_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS campus_seed (
+ id INTEGER PRIMARY KEY CHECK(id=1)
+);
+CREATE INDEX IF NOT EXISTS campus_events_date ON campus_events(starts_at);

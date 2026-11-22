@@ -56,12 +56,12 @@ button:active,.button:active {box-shadow:inset 0 2px 4px #0002}
 .top-actions .icon-button {background:var(--surface);box-shadow:var(--shadow)}
 .unread-dot {position:absolute;top:6px;right:6px;min-width:12px;min-height:12px;padding:1px 3px;border-radius:10px;background:var(--accent);color:var(--on);font-size:.62rem;text-align:center}
 .avatar {border-radius:50%;width:44px;height:44px;padding:0;font-size:.82rem;font-weight:750;background:var(--soft);color:var(--accent);border-color:var(--faint);flex:none}
-.bottom-nav {position:fixed;inset:auto 0 0;z-index:4;background:var(--surface);border-top:1px solid var(--line);padding:5px 5px calc(5px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+.bottom-nav {position:fixed;inset:auto 0 0;z-index:4;background:var(--surface);border-top:1px solid var(--line);padding:5px 5px calc(5px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
+.bottom-nav.two-tabs {grid-template-columns:repeat(2,minmax(0,1fr))}
 .nav-link {color:var(--muted);text-decoration:none;display:flex;align-items:center;gap:11px;min-height:48px;border-radius:12px;padding:8px 12px;font-weight:650;line-height:1.16}
 .nav-link:hover,.nav-link[aria-current] {color:var(--accent);background:var(--soft)}
-.bottom-nav .nav-link {flex-direction:column;justify-content:center;gap:4px;min-height:51px;font-size:.70rem;padding:4px}
+.bottom-nav .nav-link {flex-direction:column;justify-content:center;gap:4px;min-height:51px;font-size:.70rem;padding:4px 2px}
 .main {min-width:0;max-width:1392px;margin:auto;padding:21px 14px 94px}
-.main.staff {padding-bottom:30px}
 .page-head {margin-bottom:19px}
 .page-head p {margin-top:7px}
 .main-footer {font-size:.76rem;color:var(--muted);padding-top:28px;margin-top:26px;border-top:1px solid var(--faint)}
@@ -71,12 +71,13 @@ button:active,.button:active {box-shadow:inset 0 2px 4px #0002}
 .stack {display:grid;gap:12px;min-width:0}
 .space {display:grid;gap:22px;min-width:0}
 .dashboard,.split {display:grid;gap:20px;align-items:start;min-width:0}
-.dashboard {grid-template-areas:"hero" "signals" "agenda" "work" "service"}
+.dashboard {grid-template-areas:"hero" "signals" "agenda" "work" "service" "campus"}
 .area-hero {grid-area:hero}
 .area-signals {grid-area:signals}
 .area-agenda {grid-area:agenda}
 .area-work {grid-area:work}
 .area-service {grid-area:service}
+.area-campus {grid-area:campus}
 .card {border:1px solid var(--line);border-radius:var(--r-card);background:var(--surface);padding:16px;box-shadow:var(--shadow);min-width:0}
 .hero {position:relative;isolation:isolate;overflow:hidden;background:var(--hero);color:var(--hero-ink);border-color:var(--faint);padding:17px}
 .hero::after {content:"";position:absolute;width:27rem;height:27rem;left:57%;top:-11rem;z-index:-1;border-radius:7rem;border:1px solid currentColor;opacity:.12;transform:rotate(38deg);box-shadow:0 0 0 20px var(--hero),0 0 0 21px currentColor,0 0 0 42px var(--hero),0 0 0 43px currentColor,0 0 0 64px var(--hero),0 0 0 65px currentColor}
@@ -154,6 +155,15 @@ textarea {min-height:92px;resize:vertical}
 .staff-ai > summary {cursor:pointer;min-height:44px;align-content:center}
 .staff-ai > summary:focus-visible {outline:2px solid var(--focus);outline-offset:3px}
 .staff-ai-body {padding-top:12px}
+.campus-filters {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:12px;align-items:end}
+.campus-filter-panel {padding:4px 12px}
+.campus-filter-panel > summary {cursor:pointer;min-height:44px;align-content:center;font-weight:700}
+.campus-filter-panel > summary:focus-visible {outline:2px solid var(--focus);outline-offset:3px}
+.campus-filter-panel > form {padding:10px 0 8px}
+.event-row {display:grid;grid-template-columns:38px minmax(0,1fr) 20px;gap:10px;align-items:start}
+.event-icon {display:grid;place-content:center;width:38px;height:38px;border-radius:10px;background:var(--soft);color:var(--accent)}
+.event-context {gap:5px}
+.event-row .arrow {align-self:center}
 .progress {height:8px;width:100%;accent-color:var(--accent)}
 dialog {max-width:min(600px,calc(100% - 24px));width:100%;max-height:calc(100dvh - 26px);overflow:auto;border:1px solid var(--line);border-radius:var(--r-dialog);background:var(--surface);color:var(--ink);padding:16px;box-shadow:var(--shadow)}
 dialog::backdrop {background:#11202084}
@@ -175,6 +185,7 @@ dialog .dialog-head {margin-bottom:12px}
   .main {padding-inline:26px}
   .topbar {padding-inline:26px}
   .hero,.card {padding:21px}
+  .campus-filter-panel {padding:5px 18px}
   .split {grid-template-columns:repeat(2,minmax(0,1fr))}
   .login-layout {padding:24px;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:24px;align-items:stretch}
   .login-intro {align-content:start;padding:28px;gap:23px}
@@ -193,7 +204,7 @@ dialog .dialog-head {margin-bottom:12px}
   .main {padding:28px 30px 35px}
   .dashboard {
     grid-template-columns:minmax(0,1.7fr) minmax(250px,1fr);
-    grid-template-areas:"hero signals" "agenda signals" "agenda work" "service work";
+    grid-template-areas:"hero signals" "agenda signals" "agenda work" "service work" "campus campus";
     grid-template-rows:auto minmax(115px,auto) auto auto;
   }
   .toast {bottom:30px}

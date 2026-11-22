@@ -8,13 +8,23 @@ const statuses = ['Отправлена', 'В работе', 'Нужна инф�
 const demoPassword = 'SvozDemo2026!';
 const nav = [
   ['today', 'Сегодня', 'home'], ['schedule', 'Расписание', 'calendar'],
-  ['study', 'Учёба', 'book'], ['requests', 'Заявки', 'file'],
+  ['study', 'Учёба', 'book'], ['requests', 'Заявки', 'file'], ['campus','Кампус','campus'],
 ];
+const campusCategories = {
+  party:'Встречи и вечеринки', culture:'Культура', sport:'Спорт',
+  education:'Образование', volunteering:'Волонтёрство', other:'Другое',
+};
+const campusStatuses = {
+  draft:['Черновик',''], pending:['На рассмотрении','warn'], published:['Опубликовано','success'],
+  rejected:['Отклонено','danger'], cancelled:['Отменено','danger'],
+};
+const campusRoutes = ['campus','campus-event','campus-new','campus-edit'];
 const icons = {
   home: 'M3 10 12 3l9 7v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M9 21v-8h6v8',
   calendar: 'M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M7 3v5m10-5v5M3 10h18m-14 5h3m4 0h3',
   book: 'M12 6c-3-2-6-2-9-1v14c3-1 6-1 9 1 3-2 6-2 9-1V5c-3-1-6-1-9 1zm0 0v14',
   file: 'M6 3h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M14 3v5h4M8 12h7m-7 4h7',
+  campus: 'M3 10v10h18V10M2 10l10-6 10 6M7 10v10m10-10v10m-7 0v-6h4v6',
   bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9zm-8 12a2 2 0 0 0 4 0',
   sun: 'M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0zm-4-9v2m0 14v2m9-9h-2M5 12H3m15.4-6.4-1.4 1.4M7 17l-1.4 1.4m12.8 0L17 17M7 7 5.6 5.6',
   moon: 'M20.5 15.5A9 9 0 0 1 8.5 3.5a9 9 0 1 0 12 12z',
@@ -31,6 +41,8 @@ function clearSession() {
   sessionVersion += 1;
   renderToken += 1;
   Object.assign(state,{data:null,day:null,mode:'day',ticketFilter:'',itemFilter:'open',ticket:null,preview:null,aiTurns:[],aiDraft:null,staffAi:new Map(),aiGeneration:0,aiPending:false});
+  state.campus = null;
+  state.campusView = {tab:'events',category:'',when:'upcoming',query:'',club:'',status:''};
   if (dialog.open) dialog.close();
 }
 clearSession();
@@ -214,10 +226,10 @@ function login() {
 function shell(section, body) {
   const {user, notifications} = state.data;
   const staff = user.role === 'staff';
-  const active = section === 'lesson' ? 'schedule' : section === 'subject' ? 'study' : ['ticket','new-request'].includes(section) ? 'requests' : section;
+  const active = section === 'lesson' ? 'schedule' : section === 'subject' ? 'study' : ['ticket','new-request'].includes(section) ? 'requests' : campusRoutes.includes(section) ? 'campus' : section;
   const shortName = user.name.trim().split(/\s+/).slice(0,2).map(word => word[0]).join('');
   const unread = notifications.filter(n => !n.read).length;
-  const entries = staff ? [['requests', 'Обращения', 'file']] : nav;
+  const entries = staff ? [['requests','Обращения','file'],['campus','Кампус','campus']] : nav;
   const navigation = entries.map(([id, label, glyph]) => `<a class="nav-link" href="#${id}"${active === id ? ' aria-current="page"' : ''}>${icon(glyph)}<span>${label}</span></a>`).join('');
   app.innerHTML = `<div class="shell">
     <aside class="sidebar">${brand(staff ? 'requests' : 'today')}
@@ -232,7 +244,7 @@ function shell(section, body) {
         ${themeButton()}<a class="button avatar" href="#profile" aria-label="Профиль" title="Профиль">${escape(shortName)}</a>
       </div></header>
       <main class="main ${staff ? 'staff' : ''}" id="main-content" tabindex="-1">${body}<footer class="main-footer">СВОЗ — вымышленное учебное заведение. Конкурсный прототип, не официальный университетский сервис.</footer></main>
-    </div>${staff ? '' : `<nav class="bottom-nav" aria-label="Разделы кабинета">${navigation}</nav>`}
+    </div><nav class="bottom-nav${staff ? ' two-tabs' : ''}" aria-label="Разделы кабинета">${navigation}</nav>
   </div>`;
 }
 const pageHead = (title, caption = '', back = '') => `<div class="page-head stack">${back}<div><h1>${title}</h1>${caption ? `<p class="muted">${caption}</p>` : ''}</div></div>`;
@@ -275,7 +287,7 @@ function ticketRow(ticket) {
     </div><span class="arrow">${icon('arrow')}</span></a>`;
 }
 function todayPage() {
-  const {user, today, local_time, items, requests, notifications} = state.data;
+  const {user, today, local_time, items, requests, notifications, campus_events = []} = state.data;
   const lessons = sortedLessons();
   const now = local_time || new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Moscow',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date());
   const next = lessons.find(l => l.date > today || (l.date === today && l.end > now));
@@ -306,6 +318,7 @@ function todayPage() {
       <section class="area-service stack">${titleRow('Связь с деканатом',link('requests','Все заявки','button quiet','arrow'))}
         ${latest ? `<div class="list">${ticketRow(latest)}</div>` : empty('Вы ещё не отправляли заявки.')}
       </section>
+      ${campusToday(campus_events)}
     </div>`;
 }
 function schedulePage() {
@@ -494,6 +507,7 @@ function ticketPage(ticket) {
     </div>`;
 }
 function noticeDestination(n) {
+  if (n.event_id) return 'campus-event/' + n.event_id;
   if (n.request_id) return 'ticket/' + n.request_id;
   if (n.item_id) return 'items/' + n.item_id;
   if (n.lesson_id) return 'lesson/' + n.lesson_id;
@@ -506,10 +520,181 @@ function notificationsPage() {
       ${list.length ? `<div class="list">${list.map(n => `<article class="list-row stack">
         <div class="row-between"><h3>${escape(n.title)}</h3>${n.read ? '' : chip('Новое','accent')}</div>
         <p class="text-content">${escape(n.body)}</p><p class="meta">${stamp(n.created_at)} (МСК)</p>
-        <div class="row-wrap">${noticeDestination(n) ? action('notice:' + n.id,n.request_id ? 'Открыть заявку' : n.item_id ? 'Открыть задачу' : 'Открыть занятие','quiet','arrow') :
+        <div class="row-wrap">${noticeDestination(n) ? action('notice:' + n.id,n.event_id ? 'Открыть событие' : n.request_id ? 'Открыть заявку' : n.item_id ? 'Открыть задачу' : 'Открыть занятие','quiet','arrow') :
         n.read ? '' : action('notice:' + n.id,'Отметить прочитанным','quiet','check')}</div>
       </article>`).join('')}</div>` : empty('В ленте пока ничего нет.')}
     </section>`;
+}
+function campusStatus(event) {
+  const [label,tone] = campusStatuses[event.status] || ['Статус неизвестен',''];
+  return chip(label,tone);
+}
+function campusDate(value) {
+  if (!value) return '';
+  return new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}).format(new Date(value));
+}
+function campusDateInput(value) {
+  if (!value) return '';
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA',{
+    timeZone:'Europe/Moscow',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23',
+  }).formatToParts(new Date(value)).map(part => [part.type,part.value]));
+  return parts.year + '-' + parts.month + '-' + parts.day + 'T' + parts.hour + ':' + parts.minute;
+}
+function eventRow(event, compact = false) {
+  const staff = state.data.user.role === 'staff';
+  return `<a class="list-row list-link event-row" href="#campus-event/${escape(event.id)}">
+    <span class="event-icon">${icon('calendar')}</span>
+    <div class="stack event-context">
+      <p class="meta">${escape(campusDate(event.starts_at))}${compact ? '' : ' · ' + escape(campusCategories[event.category])}</p>
+      <h3>${escape(event.title)}</h3>
+      ${compact ? '' : `<p class="meta">${escape(event.location)} · Участники: ${escape(event.participants)}</p>`}
+      ${staff || event.status !== 'published' || event.joined ? `<div class="row-wrap">${staff || event.status !== 'published' ? campusStatus(event) : ''}${event.joined ? chip('Вы записаны','success') : ''}</div>` : ''}
+    </div><span class="arrow">${icon('arrow')}</span>
+    </a>`;
+}
+function eventList(events, message, compact = false) {
+  return events.length ? `<div class="list">${events.map(event => eventRow(event,compact)).join('')}</div>` : empty(message);
+}
+function campusToday(events) {
+  const now = new Date();
+  const upcoming = [...events].filter(event => event.status === 'published' && new Date(event.ends_at || event.starts_at) >= now)
+    .sort((a,b) => new Date(a.starts_at) - new Date(b.starts_at));
+  const plans = upcoming.filter(event => event.joined).slice(0,2);
+  const suggestions = upcoming.filter(event => !event.joined).slice(0,2);
+  return `<section class="area-campus stack">${titleRow('Кампус',link('campus','Все события','button quiet','arrow'))}
+    <div class="${plans.length && suggestions.length ? 'split' : 'stack'}">
+      ${plans.length ? `<div class="stack"><h3>В моих планах</h3>${eventList(plans,'',true)}</div>` : ''}
+      ${suggestions.length ? `<div class="stack"><h3>Ближайшие события</h3>${eventList(suggestions,'',true)}</div>` : ''}
+      ${!plans.length && !suggestions.length ? empty('Предстоящих событий пока нет.') : ''}
+    </div>
+    </section>`;
+}
+function option(value, label, current) {
+  return `<option value="${escape(value)}"${String(current ?? '') === String(value) ? ' selected' : ''}>${escape(label)}</option>`;
+}
+function campusPage() {
+  const staff = state.data.user.role === 'staff';
+  const {events,clubs} = state.campus;
+  const view = state.campusView;
+  const tabs = staff ? [['events','События'],['clubs','Клубы']] : [['events','Афиша'],['mine','Мои планы'],['clubs','Клубы']];
+  return pageHead('Кампус',staff ? 'События, предложения и клубы СВОЗ' : 'События и клубы СВОЗ') + `
+    <div class="space">
+      <div class="row-between">
+        <div class="segmented" aria-label="Разделы кампуса">${tabs.map(([id,label]) => `<button type="button" data-action="campus-tab:${id}" aria-pressed="${view.tab === id}">${label}</button>`).join('')}</div>
+        ${link('campus-new',staff ? 'Создать событие' : 'Предложить событие','button primary','plus')}
+      </div>
+      ${view.tab === 'clubs' ? clubsPage(clubs) : view.tab === 'mine' && !staff ? campusMine(events) : campusEvents(events,clubs,staff)}
+    </div>`;
+}
+function campusEvents(events,clubs,staff) {
+  const view = state.campusView;
+  const now = new Date();
+  const soon = new Date(now.valueOf() + 7 * 86400000);
+  const query = view.query.trim().toLocaleLowerCase('ru');
+  let result = events.filter(event => {
+    const starts = new Date(event.starts_at);
+    const ends = new Date(event.ends_at || event.starts_at);
+    return (staff || event.status === 'published') &&
+      (!view.category || event.category === view.category) &&
+      (!view.club || String(event.club_id) === view.club) &&
+      (!staff || !view.status || event.status === view.status) &&
+      (staff || view.when === 'all' || ends >= now) &&
+      (staff || view.when !== 'week' || starts <= soon) &&
+      (!query || [event.title,event.description,event.location,event.organizer].some(value => String(value ?? '').toLocaleLowerCase('ru').includes(query)));
+  }).sort((a,b) => new Date(a.starts_at) - new Date(b.starts_at));
+  if (staff && !view.status) {
+    const order = ['pending','draft','published','rejected','cancelled'];
+    result = result.sort((a,b) => order.indexOf(a.status) - order.indexOf(b.status));
+  }
+  const categoryOptions = Object.entries(campusCategories).map(([id,label]) => option(id,label,view.category)).join('');
+  const activeFilters = [view.query,view.category,view.club,staff ? view.status : view.when !== 'upcoming'].filter(Boolean).length;
+  return `<section class="stack"><details class="card campus-filter-panel"${matchMedia('(min-width: 850px)').matches ? ' open' : ''}>
+    <summary>Фильтры ${activeFilters ? chip('Выбрано: ' + activeFilters,'accent') : ''}</summary>
+    <form class="form" data-form="campus-filter">
+      <div class="campus-filters">
+        <label>Поиск<input type="search" name="query" maxlength="100" placeholder="Название, место или организатор" value="${escape(view.query)}"></label>
+        <label>Категория<select name="category">${option('','Все категории',view.category)}${categoryOptions}</select></label>
+        <label>Клуб<select name="club">${option('','Все клубы',view.club)}${clubs.map(club => option(club.id,club.name,view.club)).join('')}</select></label>
+        ${staff ? `<label>Статус<select name="status">${option('','Все статусы',view.status)}${Object.entries(campusStatuses).map(([id,[label]]) => option(id,label,view.status)).join('')}</select></label>`
+          : `<label>Дата<select name="when">${[['upcoming','Предстоящие'],['week','Ближайшие 7 дней'],['all','Все даты']].map(([id,label]) => option(id,label,view.when)).join('')}</select></label>`}
+      </div>${errorBox}
+      <div class="row-wrap"><button type="submit">Применить фильтры</button>${action('campus-reset','Сбросить','quiet')}</div>
+    </form></details>
+    <div class="section-head"><h2 id="campus-result-title" tabindex="-1">${staff ? 'Управление событиями' : 'События'}</h2>
+      ${staff ? '' : link('ask/campus','Спросить помощника','button quiet','search')}</div>
+    ${eventList(result,'Подходящих событий нет. Попробуйте изменить фильтры.')}
+    </section>`;
+}
+function campusMine(events) {
+  const joined = events.filter(event => event.joined).sort((a,b) => new Date(a.starts_at) - new Date(b.starts_at));
+  const proposed = events.filter(event => event.own && !event.joined);
+  return `<div class="split">
+    <section class="stack">${titleRow('Мои записи')}${eventList(joined,'Здесь появятся события, на которые вы записались.')}</section>
+    <section class="stack">${titleRow('Мои предложения')}${eventList(proposed,'Вы пока не предлагали события.')}</section>
+    </div>`;
+}
+function clubsPage(clubs) {
+  const staff = state.data.user.role === 'staff';
+  return clubs.length ? `<section class="split" aria-label="Клубы СВОЗ">${clubs.map(club => `<article class="card stack">
+    <div class="row-between"><h2>${escape(club.name)}</h2>${club.joined ? chip('Вы в клубе','success') : ''}</div>
+    <p class="text-content">${escape(club.description)}</p>
+    <p class="meta">Участники: ${escape(club.members)}</p>
+    <div class="row-wrap">${staff ? '' : action('campus-club-join:' + escape(club.id),club.joined ? 'Выйти из клуба' : 'Вступить',club.joined ? '' : 'primary')}
+    ${action('campus-show-club:' + escape(club.id),'События клуба','quiet','arrow')}</div>
+    </article>`).join('')}</section>` : empty('Список клубов пока пуст.');
+}
+function eventDetail(event) {
+  if (!event) return pageHead('Событие недоступно','',backLink('campus','Кампус'));
+  const staff = state.data.user.role === 'staff';
+  const upcoming = new Date(event.starts_at) >= new Date();
+  const club = state.campus.clubs.find(item => item.id === event.club_id);
+  return pageHead(escape(event.title),escape(campusCategories[event.category]),backLink('campus','Кампус')) + `
+    <section class="card stack">
+      <div class="row-wrap">${campusStatus(event)}${event.joined ? chip('Вы записаны','success') : ''}</div>
+      <dl class="detail-grid">
+        <div><dt>Начало (МСК)</dt><dd>${escape(campusDate(event.starts_at))}</dd></div>
+        ${event.ends_at ? `<div><dt>Окончание (МСК)</dt><dd>${escape(campusDate(event.ends_at))}</dd></div>` : ''}
+        <div><dt>Место</dt><dd>${escape(event.location)}</dd></div>
+        <div><dt>Организатор</dt><dd>${escape(event.organizer || club?.name || 'Сообщество СВОЗ')}</dd></div>
+        <div><dt>Участники</dt><dd>${escape(event.participants)}</dd></div>
+      </dl>
+      <p class="text-content">${escape(event.description)}</p>
+      ${staff ? eventManagement(event) : event.status === 'published' && upcoming ? `<div>
+        ${action('campus-event-join:' + escape(event.id),event.joined ? 'Отменить запись' : 'Записаться на событие',event.joined ? '' : 'primary',event.joined ? '' : 'check')}</div>` : ''}
+    </section>`;
+}
+function eventManagement(event) {
+  const actions = [];
+  if (['draft','pending'].includes(event.status)) actions.push(['published','Опубликовать','primary']);
+  if (event.status === 'pending') actions.push(['rejected','Отклонить','danger']);
+  if (event.status === 'published') actions.push(['cancelled','Отменить событие','danger']);
+  return `<div class="row-wrap">
+    ${['draft','pending','published'].includes(event.status) ? link('campus-edit/' + event.id,'Редактировать','button','Edit') : ''}
+    ${actions.map(([status,label,tone]) => action('campus-status:' + status,label,tone)).join('')}
+    </div>`;
+}
+function campusEditor(event, editing = false) {
+  const staff = state.data.user.role === 'staff';
+  if (editing && (!staff || !event || !['draft','pending','published'].includes(event.status))) {
+    return pageHead('Редактирование недоступно','',backLink('campus','Кампус'));
+  }
+  return pageHead(editing ? 'Редактировать событие' : staff ? 'Создать событие' : 'Предложить событие',
+    editing ? 'Проверьте дату, место и подробности перед сохранением.' : staff ? 'Событие сохранится как черновик.' : 'Предложение появится в афише после рассмотрения деканатом.',
+    backLink(editing ? 'campus-event/' + event.id : 'campus',editing ? 'К событию' : 'Кампус')) + `
+    <section class="card stack"><form class="form" data-form="campus-editor" data-id="${escape(event?.id)}">
+      <label>Название события<input name="title" value="${escape(event?.title)}" required maxlength="120"></label>
+      <label>Описание<textarea name="description" required maxlength="1200">${escape(event?.description)}</textarea></label>
+      <div class="campus-filters">
+        <label>Категория<select name="category" required>${option('','Выберите категорию',event?.category)}
+          ${Object.entries(campusCategories).map(([id,label]) => option(id,label,event?.category)).join('')}</select></label>
+        <label>Место<input name="location" value="${escape(event?.location)}" required maxlength="150"></label>
+        <label>Начало (МСК)<input type="datetime-local" name="starts_at" value="${escape(campusDateInput(event?.starts_at))}" required></label>
+        <label>Окончание (МСК) <small>Необязательно. По умолчанию событие длится час.</small><input type="datetime-local" name="ends_at" value="${escape(campusDateInput(event?.ends_at))}"></label>
+        <label>Организатор <small>Необязательно</small><input name="organizer" value="${escape(event?.organizer)}" maxlength="120"></label>
+        <label>Клуб <small>Необязательно</small><select name="club_id">${option('','Без клуба',event?.club_id)}
+          ${state.campus.clubs.map(club => option(club.id,club.name,event?.club_id)).join('')}</select></label>
+      </div>${errorBox}<div><button type="submit" class="primary">${editing ? 'Сохранить изменения' : staff ? 'Сохранить черновик' : 'Отправить на рассмотрение'}</button></div>
+    </form></section>`;
 }
 function profilePage() {
   const {user,ai} = state.data;
@@ -527,6 +712,7 @@ const faq = [
   ['Как ответить сотруднику деканата?', 'Откройте своё обращение в списке заявок и напишите сообщение в разделе «Переписка».', 'requests'],
 ];
 function quickQuestions(kind) {
+  if (kind === 'campus') return ['Какие события Кампуса не пересекаются с моими занятиями?', 'Как совместить события Кампуса и учебные дела на этой неделе?'];
   if (kind === 'lesson') return ['Как лучше подготовиться к этой паре?', 'Что сделать до этого занятия в первую очередь?'];
   if (kind === 'subject') return ['Что закрыть по этой дисциплине в первую очередь?', 'Составь план подготовки к ближайшей проверке'];
   if (kind === 'request') return ['Что я могу сделать, чтобы решить вопрос по этой заявке?', 'Помоги вежливо уточнить срок ответа'];
@@ -538,6 +724,7 @@ function quickQuestions(kind) {
 }
 function chatContext() {
   const [,kind,id] = route();
+  if (kind === 'campus') return {kind,title:'Кампус',params:{},url:'campus'};
   if (kind === 'lesson') {
     const lesson = findLesson(id);
     if (lesson) return {kind,title:lesson.subject + ' · ' + shortDate(lesson.date),params:{lesson_id:lesson.id},url:'lesson/' + lesson.id};
@@ -617,7 +804,7 @@ function localResults(query) {
 function aiSource(source) {
   const id = escape(encodeURIComponent(source.id));
   const record = state.data.grades.find(g => String(g.id) === String(source.id));
-  const href = {lesson:'lesson/' + id, request:'ticket/' + id, item:'items/' + id, grade:record ? 'subject/' + encodeURIComponent(record.subject) : 'study'}[source.kind];
+  const href = {lesson:'lesson/' + id, request:'ticket/' + id, item:'items/' + id, event:'campus-event/' + id, grade:record ? 'subject/' + encodeURIComponent(record.subject) : 'study'}[source.kind];
   if (href) return `<p class="meta">Источник · ${link(href, escape(source.title || 'Открыть'))}</p>`;
   return source.title ? `<p class="meta">Источник · ${escape(source.title)}</p>` : '';
 }
@@ -661,7 +848,21 @@ async function render() {
   const staff = state.data.user.role === 'staff';
   let section = page;
   let body;
-  if (page === 'ticket') {
+  if (campusRoutes.includes(page)) {
+    try {
+      const campus = await api('/campus');
+      if (token !== renderToken) return;
+      state.campus = campus;
+      const event = campus.events.find(item => String(item.id) === id);
+      if (page === 'campus') body = campusPage();
+      else if (page === 'campus-event') body = eventDetail(event);
+      else body = campusEditor(event,page === 'campus-edit');
+    } catch (error) {
+      if (token !== renderToken) return;
+      if (error.status === 401) { clearSession(); login(); return; }
+      body = pageHead('Кампус не загрузился',escape(error.message)) + action('campus-reload','Попробовать ещё раз','primary');
+    }
+  } else if (page === 'ticket') {
     try {
       const ticket = await api('/requests/' + encodeURIComponent(id ?? ''));
       if (token !== renderToken) return;
@@ -717,6 +918,30 @@ function required(value, message) {
 async function handleForm(form) {
   const values = Object.fromEntries(new FormData(form));
   const kind = form.dataset.form;
+  if (kind === 'campus-filter') {
+    Object.assign(state.campusView,values);
+    await render();
+    document.querySelector('#campus-result-title')?.focus({preventScroll:true});
+    return;
+  }
+  if (kind === 'campus-editor') {
+    const id = form.dataset.id;
+    const valuesToSave = {
+      title:required(values.title,'Введите название.'),
+      description:required(values.description,'Введите описание.'),
+      category:values.category,
+      location:required(values.location,'Введите место.'),
+      starts_at:values.starts_at + '+03:00',
+      ends_at:values.ends_at ? values.ends_at + '+03:00' : null,
+      organizer:values.organizer.trim(),
+      club_id:values.club_id ? Number(values.club_id) : null,
+    };
+    if (values.ends_at && values.ends_at <= values.starts_at) throw new Error('Окончание должно быть после начала.');
+    const result = await api(id ? '/campus/events/' + encodeURIComponent(id) : '/campus/events',id ? 'PATCH' : 'POST',valuesToSave);
+    go('campus-event/' + result.id);
+    announce(id ? 'Изменения сохранены' : state.data.user.role === 'staff' ? 'Черновик создан' : 'Предложение отправлено на рассмотрение');
+    return;
+  }
   if (kind === 'login') {
     await api('/login','POST',{login: required(values.login,'Введите логин.'),password:values.password});
     await refresh();
@@ -926,6 +1151,40 @@ async function handleAction(name,value) {
     history.replaceState(null,'',location.pathname + location.search);
     await render();
     return;
+  }
+  if (name === 'campus-reload') return render();
+  if (name === 'campus-tab') {
+    state.campusView.tab = value;
+    return render();
+  }
+  if (name === 'campus-reset' || name === 'campus-show-club') {
+    Object.assign(state.campusView,{tab:'events',category:'',when:'upcoming',query:'',club:name === 'campus-show-club' ? value : '',status:''});
+    await render();
+    document.querySelector('#campus-result-title')?.focus({preventScroll:true});
+    return;
+  }
+  if (['campus-event-join','campus-club-join'].includes(name)) {
+    const isEvent = name === 'campus-event-join';
+    const records = isEvent ? state.campus.events : state.campus.clubs;
+    const record = records.find(record => String(record.id) === value);
+    if (!record) return;
+    await api('/campus/' + (isEvent ? 'events' : 'clubs') + '/' + encodeURIComponent(value) + '/join','POST',{joined:!record.joined});
+    announce(isEvent ? (record.joined ? 'Запись отменена' : 'Вы записались на событие') : (record.joined ? 'Вы вышли из клуба' : 'Вы вступили в клуб'));
+    return render();
+  }
+  if (name === 'campus-status' || name === 'campus-confirm-status') {
+    const [,id] = route();
+    const labels = {published:'Опубликовать событие?',rejected:'Отклонить предложение?',cancelled:'Отменить событие?'};
+    if (name === 'campus-status') {
+      showDialog(labels[value],`<div class="stack"><p>${value === 'published' ? 'Событие станет доступно в студенческой афише.' :
+        value === 'rejected' ? 'Автор предложения увидит решение.' : 'Участники увидят уведомление об отмене.'}</p>
+        <div class="row-wrap">${action('campus-confirm-status:' + value,'Подтвердить','primary')}${action('close','Назад','quiet')}</div></div>`);
+      return;
+    }
+    await api('/campus/events/' + encodeURIComponent(id),'PATCH',{status:value});
+    dialog.close();
+    announce(campusStatuses[value][0]);
+    return render();
   }
   if (name === 'mode') state.mode = value;
   else if (name === 'week') state.day = plusDays(state.day,Number(value));
