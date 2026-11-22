@@ -6,13 +6,14 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 import re
 
+from PIL import Image as PillowImage
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate
+from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table
 
 
 ROOT = Path(__file__).resolve().parent
@@ -49,24 +50,59 @@ def append_evidence(source, output):
             text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escape(line))
             story.append(Paragraph(text, body))
 
-    def footer(canvas, doc):
-        width, _ = A4
-        canvas.setStrokeColor(colors.HexColor("#DBE2DF"))
-        canvas.line(48, 43, width - 48, 43)
-        canvas.setFont("Body", 9)
-        canvas.setFillColor(ACCENT)
-        canvas.drawString(48, 28, "СВОЗ / Конкурсный прототип")
-        canvas.drawRightString(width - 48, 28, str(BASE_PAGES + doc.page))
+    def render_pages(flow, offset):
+        def footer(canvas, doc):
+            width, _ = A4
+            canvas.setStrokeColor(colors.HexColor("#DBE2DF"))
+            canvas.line(48, 43, width - 48, 43)
+            canvas.setFont("Body", 9)
+            canvas.setFillColor(ACCENT)
+            canvas.drawString(48, 28, "СВОЗ / Конкурсный прототип")
+            canvas.drawRightString(width - 48, 28, str(offset + doc.page))
 
-    buffer = BytesIO()
-    SimpleDocTemplate(buffer, pagesize=A4, topMargin=46, bottomMargin=56,
-                      leftMargin=48, rightMargin=48).build(story, onFirstPage=footer, onLaterPages=footer)
-    appendix = PdfReader(buffer)
-    if len(appendix.pages) != 2:
-        raise ValueError("The evidence must fit on two pages.")
+        buffer = BytesIO()
+        SimpleDocTemplate(buffer, pagesize=A4, topMargin=46, bottomMargin=56,
+                          leftMargin=48, rightMargin=48).build(flow, onFirstPage=footer, onLaterPages=footer)
+        pages = PdfReader(buffer)
+        if len(pages.pages) != 2:
+            raise ValueError("Each report appendix must fit on two pages.")
+        return pages
+
     writer = PdfWriter()
-    writer.append(base, pages=(0, BASE_PAGES))
-    writer.append(appendix)
+    if len(base.pages) >= BASE_PAGES + 2 and "Как ставили задачи ИИ" in base.pages[BASE_PAGES].extract_text():
+        writer.append(base, pages=(0, BASE_PAGES + 2))
+    else:
+        writer.append(base, pages=(0, BASE_PAGES))
+        writer.append(render_pages(story, BASE_PAGES))
+
+    campus = ROOT / "campus-evidence.md"
+    if campus.is_file():
+        campus_story = []
+        panels = []
+        caption = ParagraphStyle("Caption", parent=body, fontSize=9, leading=12, spaceAfter=0)
+        for line in campus.read_text(encoding="utf-8-sig").splitlines():
+            if line.startswith("# "):
+                if campus_story:
+                    campus_story.append(PageBreak())
+                campus_story.append(Paragraph(escape(line[2:]), heading))
+            elif match := re.fullmatch(r"!\[(.+)\]\((.+)\)", line):
+                label, filename = match.groups()
+                file = ROOT / filename
+                with PillowImage.open(file) as image:
+                    w, h = image.size
+                scale = min(190 / w, 355 / h)
+                panels.append([Image(str(file), w * scale, h * scale, hAlign="LEFT"),
+                               Spacer(1, 5), Paragraph(escape(label), caption)])
+                if len(panels) == 2:
+                    campus_story.append(Table([panels], colWidths=[237, 237], hAlign="LEFT",
+                                             style=[("VALIGN", (0, 0), (-1, -1), "TOP")]))
+                    panels = []
+            elif line:
+                text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escape(line))
+                campus_story.append(Paragraph(text, body))
+        if panels:
+            raise ValueError("Campus screenshots must be paired.")
+        writer.append(render_pages(campus_story, BASE_PAGES + 2))
     writer.add_metadata({"/Title":"СВОЗ · отчёт о разработке", "/Author":"Команда СВОЗ",
                          "/SvozBasePages":str(BASE_PAGES)})
     with output.open("xb") as result:
