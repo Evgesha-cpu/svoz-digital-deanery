@@ -71,6 +71,7 @@ def complete(config, system, message):
                {"role":"user","content":message}], "max_tokens": 1500, "temperature": 0.2}
     if url == URL:
         payload["tool_choice"] = "required"
+        payload["reasoning"] = {"effort": "none"}
         payload["tools"] = [{"type":"function","function":{"name":"present_result",
             "description":"Publish the answer and optionally propose a single action for user review without executing it.",
             "parameters":{"type":"object","properties":{"answer":{"type":"string"},
@@ -89,7 +90,10 @@ def complete(config, system, message):
         del payload["tools"]
         del payload["tool_choice"]
         result = invoke(config, payload)
-    output = result["choices"][0]["message"]
+    choice = result["choices"][0]
+    if choice.get("finish_reason") == "length":
+        raise ValueError("Provider truncated the answer")
+    output = choice["message"]
     calls = output.get("tool_calls") or []
     if calls:
         if len(calls) != 1 or calls[0]["function"]["name"] != "present_result":

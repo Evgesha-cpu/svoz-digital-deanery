@@ -92,6 +92,21 @@ class PolzaWorkflows(unittest.TestCase):
         self.assertEqual(self.chat(self.student, "Оценки")[0], 403)
         self.assertEqual(self.provider.call_count, 2)
 
+    def test_compound_planning_merges_only_own_context(self):
+        self.consent(self.student)
+        own = self.student.dashboard()
+        other = self.other.dashboard()
+        self.provider.return_value = {"answer": "Начните с ближайшего срока."}
+        status, result = self.chat(self.student, "К чему подготовиться на этой неделе и сколько времени займут задания?")
+        self.assertEqual(status, 200, result)
+        context = json.loads(self.provider.call_args.args[1].split("Контекст JSON:\n", 1)[1])
+        self.assertTrue(context["lessons"] and context["grades"] and context["items"])
+        self.assertIn("duration_data", context["planning"])
+        self.assertFalse(context["requests"])
+        self.assertTrue({row["id"] for row in context["grades"]}.isdisjoint(row["id"] for row in other["grades"]))
+        self.assertTrue({row["id"] for row in context["items"]} <= {row["id"] for row in own["items"]})
+        self.assertIsNone(result["proposal"])
+
     def test_message_waits_for_confirmation_and_can_be_discarded(self):
         self.consent(self.student)
         self.consent(self.other)
@@ -205,6 +220,12 @@ class PolzaWorkflows(unittest.TestCase):
 
 class PolzaTransport(unittest.TestCase):
     config = (polza.URL, "synthetic-test-value", polza.MODEL)
+
+    def test_rejects_truncated_response(self):
+        completion = {"choices": [{"finish_reason": "length", "message": {"content": '{"answer":"Начните с" }'}}]}
+        with patch.object(polza, "invoke", return_value=completion):
+            with self.assertRaisesRegex(ValueError, "truncated"):
+                polza.complete(self.config, "Контекст", "Вопрос")
 
     def test_reads_single_function_result_and_provider_usage(self):
         completion = {

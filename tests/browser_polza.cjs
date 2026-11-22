@@ -68,8 +68,8 @@ async function main() {
     }
     const dean = await login(browser, 'dean', 768, 1000);
     await dean.goto(base + '/#ticket/1');
-    await dean.getByText('Помощник по заявке', { exact: true }).click();
-    await dean.getByRole('button', { name: 'Подключить Polza AI' }).click();
+    await dean.getByText('Помощник СВОЗ по заявке', { exact: true }).click();
+    await dean.getByRole('button', { name: 'Подключить помощника' }).click();
     await consent(dean);
     const panel = dean.locator('.staff-ai');
     await panel.locator('[data-action="staff-ai:reply"]').waitFor({state: 'attached'});

@@ -145,7 +145,7 @@ async function workflows(browser) {
   await fit(mobile);
   await mobile.waitForFunction(() => document.querySelector('#toast').textContent === '');
   await screenshot(mobile, '07-student-ticket-mobile');
-  await visit(mobile, 'ask', 'Найти или спросить СВОЗ');
+  await visit(mobile, 'ask', 'Помощник СВОЗ');
   await mobile.getByLabel('Что хотите найти?').fill('справку');
   await mobile.getByRole('link', { name: /Как получить справку/ }).waitFor();
   await mobile.getByRole('button', { name: 'Настроить ИИ' }).click();

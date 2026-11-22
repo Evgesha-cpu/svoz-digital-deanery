@@ -39,6 +39,75 @@ let toastTimer;
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => (
   {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]
 ));
+function answerInline(value) {
+  const tokens = /\[([^\]\n]+)\]\(([^\s()]+)\)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|`([^`\n]+)`/g;
+  let result = '';
+  let offset = 0;
+  for (const token of value.matchAll(tokens)) {
+    result += escape(value.slice(offset, token.index));
+    if (token[1]) {
+      let url;
+      try { url = new URL(token[2]); } catch { /* Unsupported link syntax. */ }
+      result += url && ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password
+        ? `<a href="${escape(url.href)}" target="_blank" rel="noopener noreferrer">${escape(token[1])}</a>`
+        : escape(token[1]);
+    } else if (token[3] || token[4]) {
+      result += `<strong>${escape(token[3] || token[4])}</strong>`;
+    } else if (token[5]) {
+      result += `<em>${escape(token[5])}</em>`;
+    } else {
+      result += `<code>${escape(token[6])}</code>`;
+    }
+    offset = token.index + token[0].length;
+  }
+  return result + escape(value.slice(offset));
+}
+
+function answerMarkdown(value) {
+  const lines = String(value ?? '').split(/\r?\n/).map(line => line.trim());
+  const list = /^(?:([-*+])|(\d+)[.)])\s+(.+)/;
+  const cells = line => line.replace(/^\|\s*|\s*\|$/g, '').split('|').map(cell => cell.trim());
+  const separator = line => line?.includes('|') && cells(line).every(cell => /^:?-{3,}:?$/.test(cell));
+  const tableAt = index => lines[index]?.includes('|') && separator(lines[index + 1]);
+  const html = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line || /^([-*_])\1{2,}$/.test(line)) { index++; continue; }
+    if (tableAt(index)) {
+      const headers = cells(line);
+      const rows = [];
+      index += 2;
+      while (lines[index]?.includes('|')) {
+        const row = cells(lines[index++]);
+        rows.push('<tr>' + headers.map((_, col) => `<td>${answerInline(row[col] || '')}</td>`).join('') + '</tr>');
+      }
+      html.push('<div class="answer-table" tabindex="0" role="region" aria-label="Таблица ответа"><table><thead><tr>' +
+        headers.map(cell => `<th scope="col">${answerInline(cell)}</th>`).join('') + '</tr></thead><tbody>' +
+        rows.join('') + '</tbody></table></div>');
+    } else if (list.test(line)) {
+      const type = line.match(list)[2] ? 'ol' : 'ul';
+      const entries = [];
+      let entry;
+      while ((entry = lines[index]?.match(list)) && (entry[2] ? 'ol' : 'ul') === type) {
+        entries.push(`<li>${answerInline(entry[3])}</li>`);
+        index++;
+      }
+      html.push(`<${type}>${entries.join('')}</${type}>`);
+    } else if (/^#{1,6}\s+/.test(line)) {
+      html.push(`<p><strong>${answerInline(line.replace(/^#{1,6}\s+/, ''))}</strong></p>`);
+      index++;
+    } else {
+      const paragraph = [line];
+      index++;
+      while (lines[index] && !list.test(lines[index]) && !tableAt(index) &&
+             !/^(?:#{1,6}\s+|([-*_])\1{2,}$)/.test(lines[index])) paragraph.push(lines[index++]);
+      html.push(`<p>${answerInline(paragraph.join(' '))}</p>`);
+    }
+  }
+  return html.join('');
+}
+
 const icon = name => `<svg class="i" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="${icons[name]}"/></svg>`;
 const action = (name, label, classes = '', glyph = '') => `<button type="button" data-action="${name}" class="${classes}">${glyph ? icon(glyph) : ''}${label}</button>`;
 const link = (url, label, classes = '', glyph = '') => `<a href="#${url}" class="${classes}">${glyph ? icon(glyph) : ''}${label}</a>`;
@@ -158,7 +227,7 @@ function shell(section, body) {
     <div><header class="topbar">${brand(staff ? 'requests' : 'today')}
       <span class="desktop-label meta">${staff ? 'Кабинет сотрудника' : escape(user.group) + ' · Личный кабинет'}</span>
       <div class="top-actions">
-        ${staff ? '' : `<a href="#ask" class="button icon-button" aria-label="Найти или спросить СВОЗ" title="Найти или спросить СВОЗ">${icon('search')}</a>`}
+        ${staff ? '' : `<a href="#ask" class="button icon-button" aria-label="Помощник СВОЗ" title="Помощник СВОЗ">${icon('search')}</a>`}
         <a href="#notifications" class="button icon-button" title="Уведомления" aria-label="Уведомления${unread ? ', непрочитанных ' + unread : ''}">${icon('bell')}${unread ? `<span aria-hidden="true" class="unread-dot">${unread}</span>` : ''}</a>
         ${themeButton()}<a class="button avatar" href="#profile" aria-label="Профиль" title="Профиль">${escape(shortName)}</a>
       </div></header>
@@ -228,7 +297,7 @@ function todayPage() {
           ${change ? `<div class="signal change stack"><div>${chip('Перенос занятия','warn')}</div><h3>${escape(change.subject)}</h3>${diff(change)}${link('lesson/' + change.id,'Детали переноса')}</div>` : ''}
           ${signal ? `<div class="signal"><strong>${escape(signal.title)}</strong><p class="meta">${escape(signal.body)}</p>${link('notifications','К уведомлениям')}</div>` : ''}
           ${!change && !signal ? empty('Новых изменений и напоминаний нет.') : ''}
-          ${link('ask','Найти или спросить СВОЗ','button','search')}
+          ${link('ask','Помощник СВОЗ','button','search')}
       </section>
       <section class="area-agenda stack">${titleRow('Пары сегодня',link('schedule','Расписание','button quiet','arrow'))}${lessonList(todayLessons)}</section>
       <section class="area-work stack">${titleRow('Мои дела',action('new-item','Добавить','quiet','plus'))}
@@ -457,12 +526,16 @@ const faq = [
   ['Где увидеть сроки экзаменов и зачётов?', 'В разделе «Учёба» откройте нужную дисциплину или найдите срок в навигаторе.', 'study'],
   ['Как ответить сотруднику деканата?', 'Откройте своё обращение в списке заявок и напишите сообщение в разделе «Переписка».', 'requests'],
 ];
-const quickQuestions = {
-  general: ['Какое у меня завтра расписание?', 'Что нужно сделать до конца недели?', 'Когда ближайший экзамен?', 'Как получить справку об обучении?'],
-  lesson: ['Что изменилось в этом занятии?', 'Создай заметку, что на пару нужно принести работу'],
-  subject: ['Что осталось сдать по этой дисциплине?', 'Составь план подготовки к ближайшей проверке по этой дисциплине'],
-  request: ['Какой статус этой заявки?', 'Подготовь сообщение с просьбой уточнить срок ответа по этой заявке'],
-};
+function quickQuestions(kind) {
+  if (kind === 'lesson') return ['Как лучше подготовиться к этой паре?', 'Что сделать до этого занятия в первую очередь?'];
+  if (kind === 'subject') return ['Что закрыть по этой дисциплине в первую очередь?', 'Составь план подготовки к ближайшей проверке'];
+  if (kind === 'request') return ['Что я могу сделать, чтобы решить вопрос по этой заявке?', 'Помоги вежливо уточнить срок ответа'];
+  const today = state.data.today;
+  const urgent = state.data.items.some(item => item.kind === 'task' && !item.done && item.due && item.due <= plusDays(today,2)) ||
+    state.data.grades.some(grade => !grade.grade && grade.due && grade.due <= plusDays(today,2));
+  return [urgent ? 'Как распределить срочные учебные дела?' : 'К чему подготовиться на этой неделе?',
+    'Сколько времени займут мои задания?', 'Что лучше сделать сегодня?', 'Помоги составить план подготовки к сессии'];
+}
 function chatContext() {
   const [,kind,id] = route();
   if (kind === 'lesson') {
@@ -486,20 +559,20 @@ function staffAssistant(ticket) {
   const {ai} = state.data;
   const result = state.staffAi.get(ticket.id);
   return `<details class="card staff-ai"${result ? ' open' : ''}>
-    <summary><strong>Помощник по заявке</strong> ${chip(ai.enabled ? 'Polza AI' : 'ИИ выключен',ai.enabled ? 'accent' : '')}</summary>
+    <summary><strong>Помощник СВОЗ по заявке</strong> ${chip(ai.enabled ? 'Включён' : 'ИИ выключен',ai.enabled ? 'accent' : '')}</summary>
     <div class="stack staff-ai-body">
       <p class="meta">Контекст ограничен этой заявкой и правилами СВОЗ. Проверяйте черновики перед отправкой.</p>
-      ${!ai.available ? '<p class="notice">Polza AI сейчас недоступен. Переписка и обработка заявки работают.</p>' : ''}
-      ${!ai.enabled ? `<div>${action('ai-consent','Подключить Polza AI','', 'plus')}</div>` : ai.available ? `
+      ${!ai.available ? '<p class="notice">Помощник сейчас недоступен. Переписка и обработка заявки работают.</p>' : ''}
+      ${!ai.enabled ? `<div>${action('ai-consent','Подключить помощника','', 'plus')}</div>` : ai.available ? `
         <div class="row-wrap">${Object.entries(staffPrompts).map(([mode,[label]]) => action('staff-ai:' + mode,label)).join('')}</div>
         <div data-staff-ai-result class="stack" aria-live="polite">${result ? staffAiResult(result) : ''}</div>` : ''}
     </div></details>`;
 }
 function staffAiResult(result) {
-  if (result.loading) return '<p class="notice" role="status">Polza AI готовит ответ…</p>';
+  if (result.loading) return '<p class="notice" role="status">Помощник отвечает…</p>';
   if (result.error) return `<p class="error" role="alert">${escape(result.error)}</p>`;
   return `<article class="message stack"><h3>${staffPrompts[result.mode][0]}</h3>
-    <p class="text-content">${escape(result.answer)}</p>${(result.sources || []).map(aiSource).join('')}
+    <div class="answer-content">${answerMarkdown(result.answer)}</div>${(result.sources || []).map(aiSource).join('')}
     ${result.mode === 'reply' ? `<div>${action('staff-fill','Вставить в поле ответа','primary','arrow')}</div>` : ''}
     </article>`;
 }
@@ -511,21 +584,21 @@ function askPage() {
     <label>Что хотите найти?<input type="search" id="local-search" placeholder="Например, справка или расписание"></label>
     <div id="search-results" class="stack" aria-live="polite">${localResults('')}</div>
     </section>`;
-  return pageHead('Найти или спросить СВОЗ','Справка по кабинету и ИИ-помощник') + `
+  return pageHead('Помощник СВОЗ','Справка по кабинету и ИИ-помощник') + `
     <div class="space">${!ai.enabled && !context.title ? search : ''}
     <section class="card stack">
-      <div class="row-between"><h2>ИИ-помощник</h2>${chip(ai.enabled ? 'Включён' : 'Выключен',ai.enabled ? 'accent' : '')}</div>
+      <div class="row-between"><h2>Чат</h2>${chip(ai.enabled ? 'Включён' : 'Выключен',ai.enabled ? 'accent' : '')}</div>
       ${context.title ? `<div class="row-between notice"><p>Контекст · ${link(context.url,escape(context.title))}</p>${link('ask','Убрать контекст','button quiet')}</div>` : ''}
-      ${!ai.available ? '<p class="notice">Polza AI сейчас недоступен. Поиск, расписание, заявки и остальные разделы кабинета доступны.</p>' : ''}
+      ${!ai.available ? '<p class="notice">Помощник сейчас недоступен. Поиск, расписание, заявки и остальные разделы кабинета доступны.</p>' : ''}
       ${ai.enabled ? `<p class="meta">Помощник работает с данными вашего кабинета. Проверяйте ответы перед действием.</p>
         <div>${action('ai-off','Выключить ИИ','quiet')}</div>
         ${state.aiTurns.length ? `<div class="stack" id="ai-history" aria-label="История диалога">${state.aiTurns.map((turn,index) => `<article class="message ${turn.role === 'user' ? 'mine' : ''} stack">
             <div class="row-between"><strong>${turn.role === 'user' ? 'Вы' : 'СВОЗ'}</strong>${turn.context ? chip(turn.context) : ''}</div>
-            <p class="text-content">${escape(turn.text)}</p>${(turn.sources || []).map(aiSource).join('')}${turn.proposal ? aiProposal(turn.proposal,index) : ''}</article>`).join('')}</div>` : ''}
+            ${turn.role === 'assistant' ? `<div class="answer-content">${answerMarkdown(turn.text)}</div>` : `<p class="text-content">${escape(turn.text)}</p>`}${(turn.sources || []).map(aiSource).join('')}${turn.proposal ? aiProposal(turn.proposal,index) : ''}</article>`).join('')}</div>` : ''}
         ${ai.available ? `<div class="row-wrap ai-quick" aria-label="Примеры вопросов">
-          ${quickQuestions[context.kind].map((question,index) => action('ai-example:' + index,escape(question))).join('')}</div>
+          ${quickQuestions(context.kind).map((question,index) => action('ai-example:' + index,escape(question))).join('')}</div>
           <form class="form" data-form="ai-chat"><label>Ваш вопрос<textarea name="message" required maxlength="1500" placeholder="Например: что завтра и что нужно подготовить?"></textarea></label>
-            <p data-generating role="status" class="meta"${state.aiPending ? '' : ' hidden'}>Polza AI готовит ответ…</p>
+            <p data-generating role="status" class="meta"${state.aiPending ? '' : ' hidden'}>Помощник отвечает…</p>
             ${errorBox}<div><button class="primary" type="submit"${state.aiPending ? ' disabled' : ''}>Спросить СВОЗ ${icon('arrow')}</button></div></form>` : ''}
       ` : `<p>Помощник ответит по вашему расписанию, учебным срокам и заявкам или подготовит черновик.</p><div>${action('ai-consent','Настроить ИИ','', 'plus')}</div>`}
     </section>${ai.enabled || context.title ? search : ''}</div>`;
@@ -813,7 +886,7 @@ function staffFill(replace = false) {
   const reply = result?.proposal?.text || result?.answer;
   if (result?.mode !== 'reply' || !reply || !field) return;
   if (field.value.trim() && !replace) {
-    showDialog('Заменить текст ответа?',`<p>В поле уже есть текст. Заменить его черновиком Polza AI?</p>
+    showDialog('Заменить текст ответа?',`<p>В поле уже есть текст. Заменить его черновиком помощника?</p>
       <div class="row-wrap">${action('staff-replace','Заменить','primary')}${action('close','Отмена','quiet')}</div>`);
     return;
   }
@@ -896,7 +969,7 @@ async function handleAction(name,value) {
     await refresh();
     announce('ИИ выключен');
   } else if (name === 'ai-example') {
-    const question = quickQuestions[chatContext().kind][Number(value)];
+    const question = quickQuestions(chatContext().kind)[Number(value)];
     const field = document.querySelector('[data-form="ai-chat"] textarea');
     if (!field || !question || state.aiPending) return;
     field.value = question;

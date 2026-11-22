@@ -351,34 +351,54 @@ def ai_context(db, user, payload, message):
     if subject and subject not in subjects:
         raise ApiError(404, "Дисциплина не найдена.")
     query = message.casefold()
-    if not subject:
-        subject = next((entry for entry in sorted(subjects, key=len, reverse=True)
-                        if entry.casefold() in query), None)
+    named = {entry for entry in subjects if entry.casefold() in query}
+    scoped = ({subject} if subject else set()) | named
     schedule = lesson_id is not None or re.search(r"расписан|заняти|пар[аыуе]|перен|аудитор|замен|сегод|завтра", query)
-    study = subject or re.search(r"оцен|успеваем|зач[её]т|экзамен|сесси|сда[тьй]|закры|контроль|подготов|задан|до конц", query)
-    planning = re.search(r"задач|задан|дел[ао]|замет|напом|подготов|план|до конц", query)
+    study = scoped or re.search(r"оцен|успеваем|зач[её]т|экзамен|сесси|сда|закры|контроль|подготов|задан", query)
+    planning = re.search(
+        r"к чему|успею|успеть|сроч|приоритет|сколько времени|займ[её]т|нагруз|накопил|с чего|"
+        r"распредел|сплан|план|подготов|выходн|до конц|до пятниц|сделать|задани|домашн", query
+    )
+    personal = planning or re.search(r"задач|замет|напом|дел[ао]", query)
     requests = request_id is not None or re.search(r"заяв|обращен|деканат|сообщен|справк|статус", query)
-    general = not any((schedule, study, planning, requests))
-    if schedule or subject or planning:
-        lessons = data["lessons"]
-        if lesson_id is not None:
-            lessons = [row for row in lessons if row["id"] == lesson_id]
-        elif subject:
-            lessons = [row for row in lessons if row["subject"] == subject]
-        elif "перен" in query or "измен" in query or "замен" in query:
+    general = not any((schedule, study, personal, requests))
+
+    def matches(row):
+        return not scoped or row["subject"] in scoped
+
+    if schedule or scoped or personal:
+        lessons = [row for row in data["lessons"] if matches(row)]
+        if not planning and lesson_id is not None:
+            lessons = [row for row in data["lessons"] if row["id"] == lesson_id]
+        elif not planning and re.search(r"перен|измен|замен", query):
             lessons = [row for row in lessons if row["changed_at"]]
-        elif "завтра" in query:
+        elif not planning and "завтра" in query and "сегодня" not in query:
             lessons = [row for row in lessons if row["date"] == context["tomorrow"]]
-        elif "сегодня" in query:
+        elif not planning and "сегодня" in query and "завтра" not in query:
             lessons = [row for row in lessons if row["date"] == context["today"]]
         else:
-            lessons = [row for row in lessons if row["date"] >= context["today"]]
+            lessons = [row for row in lessons if row["date"] >= context["today"] or row["id"] == lesson_id]
+        if planning:
+            lessons.sort(key=lambda row: (row["id"] != lesson_id, row["date"], row["start"]))
         context["lessons"] = lessons[:12]
-    if study:
-        context["grades"] = [row for row in data["grades"] if not subject or row["subject"] == subject][:12]
+    if study or planning:
+        records = [row for row in data["grades"] if matches(row)]
+        if planning:
+            records.sort(key=lambda row: (row["grade"] is not None, row["due"] or "9999", row["id"]))
+        context["grades"] = records[:12]
+    if personal:
+        items = [row for row in data["items"] if not row["done"] and
+                 (matches(row) or row["kind"] == "note" and row["lesson_id"] is not None and row["lesson_id"] == lesson_id)]
+        items.sort(key=lambda row: (row["kind"] != "task", row["due"] or "9999", -row["id"]))
+        tasks, notes = ([row for row in items if row["kind"] == kind] for kind in ("task", "note"))
+        context["items"] = [{**row, "text": row["text"][:200]} for row in tasks[:8] + notes[:4]]
     if planning:
-        context["items"] = [{**row, "text": row["text"][:200]} for row in data["items"]
-                            if not row["done"] and (not subject or row["subject"] == subject)][:8]
+        context["planning"] = {
+            "local_time": now().strftime("%H:%M"),
+            "week_ends": (today + timedelta(days=6-today.weekday())).isoformat(),
+            "next_seven_days_end": (today + timedelta(days=6)).isoformat(),
+            "duration_data": "Продолжительность и объём работ не заданы отдельными полями.",
+        }
     if requests:
         context["requests"] = [{key: row[key] for key in ("id", "type", "subject", "status")}
                                for row in data["requests"] if request_id is None or row["id"] == request_id][:6]
@@ -389,12 +409,27 @@ def ai_context(db, user, payload, message):
         requested = number[1]
         context["requests"] = [row for row in context["requests"] if str(row["id"]) == requested]
     role_instruction = (
-        "Предложи один note/task с text и при необходимости subject, lesson_id или due (ГГГГ-ММ-ДД). "
+        "Для простого запроса обычно достаточно 2–5 предложений. Начинай с вывода или ближайшего шага. "
+        "Для планирования дай короткий список: сначала просроченное и ближайшие сроки, затем подготовка. "
+        "Обычно достаточно 3–5 шагов и примерно 120 слов, если пользователь не попросил подробный план. "
+        "Учитывай совмещение с занятиями и время, которое назвал студент. Ссылайся на несколько релевантных записей. "
+        "Пробелы в расписании не доказывают, что студент свободен. Не предполагай зависимости между разными заданиями. "
+        "В плане не пересказывай расписание: упоминай занятие только для разрешения конфликта по времени. "
+        "При этом копируй дату, время и название из одной и той же записи lessons. "
+        "Задача связана с занятием только по lesson_id, её due не является датой этого занятия. "
+        "Точно воспроизводи оценки, сроки и известные материалы только из записей. Не изобретай объём, материалы, "
+        "санкции за опоздание, дедлайны и доступные часы. Различай зафиксированные данные и рекомендации. "
+        "Оценивай длительность диапазонами только как грубое допущение по типу работы. Если объём совсем неизвестен, "
+        "не оценивай эту работу и не складывай её с остальными. Предложи короткую оценочную сессию или задай один конкретный вопрос. "
+        "Не называй дело просроченным, если его due равен today или позже. Не повторяй вопрос, не пиши формальное заключение. "
+        "Используй абзацы, списки и выделение, избегай таблиц без необходимости. "
+        "Обычно proposal=null. Предлагай одно действие при явной просьбе или очевидной практической пользе. "
+        "Для note/task укажи text и при необходимости subject, lesson_id или due (ГГГГ-ММ-ДД). "
         "Для напоминания используй task с due. Если дата не ясна, уточни. Черновик новой заявки: "
         "request с type (study/transcript/application/question), title, text. "
         "Сообщение в существующий тред: message с request_id и text. Используй только идентификаторы из контекста. "
         "Ничего не считай сохранённым или отправленным до подтверждения. Если требуется план подготовки, "
-        "дай шаги с учётом указанных сроков, предлагая не более одного действия за ответ."
+        "дай шаги с учётом указанных сроков."
     )
     if request_id is not None:
         role_instruction += (

@@ -208,3 +208,14 @@ dialog .dialog-head {margin-bottom:12px}
   .hero {padding:24px}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after {transition:none!important;scroll-behavior:auto!important}}
+
+.answer-content {min-width:0;overflow-wrap:anywhere;line-height:1.55}
+.answer-content > * {margin:0}
+.answer-content > * + * {margin-top:.65em}
+.answer-content :is(ul,ol) {padding-inline-start:1.35em}
+.answer-content li + li {margin-top:.22em}
+.answer-content a {text-decoration:underline}
+.answer-table {max-width:100%;overflow-x:auto}
+.answer-table table {width:100%;border-collapse:collapse}
+.answer-table :is(th,td) {padding:.4rem .55rem;text-align:left;border:1px solid var(--line)}
+.ai-quick button {text-align:left;max-width:100%;white-space:normal}
