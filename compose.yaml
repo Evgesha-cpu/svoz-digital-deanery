@@ -1,0 +1,32 @@
+name: svoz
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    init: true
+    read_only: true
+    mem_limit: 192m
+    cpus: 0.50
+    pids_limit: 64
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      SVOZ_SECURE_COOKIE: '1'
+      SVOZ_ISOLATED_DEMO: '1'
+      POLZA_API_KEY: ${POLZA_API_KEY:-}
+    volumes:
+      - database:/data
+    ports:
+      - "127.0.0.1:18080:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+volumes:
+  database:

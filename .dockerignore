@@ -1,0 +1,11 @@
+.git
+data
+*.sqlite*
+*.db
+*.db-*
+.env*
+__pycache__
+node_modules
+test-results
+references
+contest
