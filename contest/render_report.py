@@ -1,81 +1,81 @@
-from pathlib import Path
+"""Add the evidence appendix to the hand-corrected PDF without reflowing its pages."""
+import argparse
+from io import BytesIO
 import os
-import re
+from pathlib import Path
 from xml.sax.saxutils import escape
+import re
 
-from PIL import Image as PillowImage
+from pypdf import PdfReader, PdfWriter
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table
-
-root = Path(__file__).resolve().parent
-fonts = Path(os.environ.get("SVOZ_REPORT_FONTS", "C:/Windows/Fonts"))
-pdfmetrics.registerFont(TTFont("Body", str(fonts / "arial.ttf")))
-pdfmetrics.registerFont(TTFont("Bold", str(fonts / "arialbd.ttf")))
-pdfmetrics.registerFontFamily("Body", normal="Body", bold="Bold")
-ink = colors.HexColor("#18262C")
-accent = colors.HexColor("#115C61")
-body = ParagraphStyle("body", fontName="Body", fontSize=11, leading=16, textColor=ink, spaceAfter=8)
-title = ParagraphStyle("title", parent=body, fontName="Bold", fontSize=25, leading=30, textColor=accent, spaceAfter=20, keepWithNext=True)
-header = ParagraphStyle("header", parent=body, fontName="Bold", fontSize=15, leading=20, textColor=accent, spaceBefore=10, keepWithNext=True)
-caption = ParagraphStyle("caption", parent=body, fontSize=10)
-story = []
-portraits = []
-
-def markup(line):
-    return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escape(line.replace("`", "")))
-
-def add_portraits():
-    if portraits:
-        story.append(Table([portraits[:]], colWidths=[239] * len(portraits), hAlign="LEFT",
-                           style=[("VALIGN", (0, 0), (-1, -1), "TOP")]))
-        portraits.clear()
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate
 
 
-for line in (root / "report.md").read_text(encoding="utf-8-sig").splitlines():
-    if not line:
-        continue
-    if line.startswith("# "):
-        story.append(Paragraph(markup(line[2:]), title))
-    elif line.startswith("## "):
-        add_portraits()
-        if "Снимки браузерных" in line:
-            story.append(PageBreak())
-        story.append(Paragraph(markup(line[3:]), header))
-    elif match := re.fullmatch(r"!\[(.*)\]\((.+)\)", line):
-        label, filename = match.groups()
-        path = root / filename
-        with PillowImage.open(path) as source:
-            w, h = source.size
-        scale = min((218 if h > w else 446) / w, 455 / h)
-        panel = [Image(str(path), w * scale, h * scale, hAlign="LEFT"),
-                 Spacer(1, 7), Paragraph(markup(label), caption)]
-        if h > w:
-            portraits.append(panel)
-            if len(portraits) == 2:
-                add_portraits()
-        else:
-            add_portraits()
-            story.append(KeepTogether(panel))
-    else:
-        add_portraits()
-        line = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", line)
-        story.append(Paragraph(markup(line.replace("- ", "• ", 1) if line.startswith("- ") else line), body))
-add_portraits()
+ROOT = Path(__file__).resolve().parent
+BASE_PAGES = 9
+REGION_STATEMENT = "Доступность из РФ без VPN отдельно не проверялась."
+ACCENT = colors.HexColor("#115C61")
 
-def page(canvas, doc):
-    width, _ = A4
-    canvas.setStrokeColor(colors.HexColor("#DBE2DF"))
-    canvas.line(48, 43, width - 48, 43)
-    canvas.setFont("Body", 9)
-    canvas.setFillColor(accent)
-    canvas.drawString(48, 28, "СВОЗ / Конкурсный прототип")
-    canvas.drawRightString(width - 48, 28, str(doc.page))
 
-SimpleDocTemplate(str(root / "report.pdf"), pagesize=A4, topMargin=46,
-                  bottomMargin=56, leftMargin=48, rightMargin=48,
-                  title="СВОЗ · отчёт о разработке", author="Команда СВОЗ").build(
-                      story, onFirstPage=page, onLaterPages=page)
+def append_evidence(source, output):
+    if output.exists() or source.resolve() == output.resolve():
+        raise ValueError("Choose a new output file; the source PDF is preserved.")
+    base = PdfReader(source)
+    recorded_count = (base.metadata or {}).get("/SvozBasePages")
+    if len(base.pages) != BASE_PAGES and recorded_count != str(BASE_PAGES):
+        raise ValueError("Use the manually corrected report or a report generated from it.")
+    if " ".join(REGION_STATEMENT.split()) not in " ".join(base.pages[1].extract_text().split()):
+        raise ValueError("Missing the manually corrected wording about access from Russia.")
+
+    fonts = Path(os.getenv("SVOZ_REPORT_FONTS", "C:/Windows/Fonts"))
+    pdfmetrics.registerFont(TTFont("Body", str(fonts / "arial.ttf")))
+    pdfmetrics.registerFont(TTFont("Bold", str(fonts / "arialbd.ttf")))
+    pdfmetrics.registerFontFamily("Body", normal="Body", bold="Bold")
+    body = ParagraphStyle("Body", fontName="Body", fontSize=11, leading=16,
+                          textColor=colors.HexColor("#18262C"), spaceAfter=10)
+    heading = ParagraphStyle("Heading", parent=body, fontName="Bold", fontSize=21,
+                             leading=26, textColor=ACCENT, spaceAfter=14, keepWithNext=True)
+    story = []
+    for line in (ROOT / "ai-evidence.md").read_text(encoding="utf-8-sig").splitlines():
+        if line.startswith("# "):
+            if story:
+                story.append(PageBreak())
+            story.append(Paragraph(escape(line[2:]), heading))
+        elif line:
+            text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escape(line))
+            story.append(Paragraph(text, body))
+
+    def footer(canvas, doc):
+        width, _ = A4
+        canvas.setStrokeColor(colors.HexColor("#DBE2DF"))
+        canvas.line(48, 43, width - 48, 43)
+        canvas.setFont("Body", 9)
+        canvas.setFillColor(ACCENT)
+        canvas.drawString(48, 28, "СВОЗ / Конкурсный прототип")
+        canvas.drawRightString(width - 48, 28, str(BASE_PAGES + doc.page))
+
+    buffer = BytesIO()
+    SimpleDocTemplate(buffer, pagesize=A4, topMargin=46, bottomMargin=56,
+                      leftMargin=48, rightMargin=48).build(story, onFirstPage=footer, onLaterPages=footer)
+    appendix = PdfReader(buffer)
+    if len(appendix.pages) != 2:
+        raise ValueError("The evidence must fit on two pages.")
+    writer = PdfWriter()
+    writer.append(base, pages=(0, BASE_PAGES))
+    writer.append(appendix)
+    writer.add_metadata({"/Title":"СВОЗ · отчёт о разработке", "/Author":"Команда СВОЗ",
+                         "/SvozBasePages":str(BASE_PAGES)})
+    with output.open("xb") as result:
+        writer.write(result)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+    append_evidence(args.base, args.output)
